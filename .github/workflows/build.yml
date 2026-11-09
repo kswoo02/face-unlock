@@ -85,8 +85,12 @@ jobs:
           name: FaceUnlock
           path: package/FaceUnlock
 
+      # main 에 push 할 때마다 릴리스를 만든다 -> setup.ps1 이 releases/latest 에서 받는다.
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v0.1.{0}', github.run_number) }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
           files: FaceUnlock.zip

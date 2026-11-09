@@ -1,0 +1,4 @@
+LIBRARY FaceUnlockProvider
+EXPORTS
+    DllCanUnloadNow PRIVATE
+    DllGetClassObject PRIVATE

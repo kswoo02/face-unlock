@@ -61,7 +61,7 @@ if ($faceDevices.Count -gt 0) {
 } elseif ($irCameras.Count -gt 0) {
     Add-Result 'Hello 얼굴 장치' 'WARN' "IR 카메라($($irCameras[0].FriendlyName))는 보이지만 얼굴 인식 장치가 없습니다. Enable-HelloFace.ps1 로 기능 설치를 시도하세요."
 } else {
-    Add-Result 'Hello 얼굴 장치' 'FAIL' 'IR(적외선) 카메라가 없습니다. 일반 웹캠으로는 Windows Hello 얼굴 인식을 쓸 수 없습니다. docs/HARDWARE.md 참고.'
+    Add-Result 'Hello 얼굴 장치' 'FAIL' 'IR(적외선) 카메라가 없습니다. 일반 웹캠으로는 Windows Hello 얼굴 인식을 쓸 수 없습니다. HARDWARE.md 참고.'
 }
 
 if ($fingerDevices.Count -gt 0) {
@@ -109,7 +109,7 @@ if ($antiSpoof -eq 1) {
 # --- 5. 보안 강화 로그인 (ESS) -------------------------------------------
 $ess = Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\SecureBiometrics' 'Enabled'
 if ($ess -eq 1) {
-    Add-Result '보안 강화 로그인(ESS)' 'WARN' '켜짐 - 내장 센서만 사용 가능. 외장 IR 카메라를 쓰려면 설정 > 계정 > 로그인 옵션 에서 "외부 카메라 또는 지문 판독기로 로그인" 을 켜야 합니다 (docs/HARDWARE.md).'
+    Add-Result '보안 강화 로그인(ESS)' 'WARN' '켜짐 - 내장 센서만 사용 가능. 외장 IR 카메라를 쓰려면 설정 > 계정 > 로그인 옵션 에서 "외부 카메라 또는 지문 판독기로 로그인" 을 켜야 합니다 (HARDWARE.md).'
 } elseif ($null -ne $ess) {
     Add-Result '보안 강화 로그인(ESS)' 'INFO' "Enabled = $ess"
 } else {

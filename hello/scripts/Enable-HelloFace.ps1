@@ -104,7 +104,7 @@ $face = @(Get-PnpDevice -PresentOnly -Class Biometric -ErrorAction SilentlyConti
     Where-Object { $_.FriendlyName -match 'Face|얼굴' })
 if ($face.Count -eq 0) {
     Write-Host '얼굴 인식 장치가 아직 보이지 않습니다.' -ForegroundColor Yellow
-    Write-Host ' - IR 카메라가 없는 노트북이면 외장 Windows Hello 웹캠이 필요합니다 (docs/HARDWARE.md).'
+    Write-Host ' - IR 카메라가 없는 노트북이면 외장 Windows Hello 웹캠이 필요합니다 (HARDWARE.md).'
     Write-Host ' - IR 카메라가 있다면: 재부팅 -> Samsung Update 에서 카메라 드라이버 업데이트 -> 다시 실행.'
 } else {
     $face | ForEach-Object { Write-Host "발견: $($_.FriendlyName) [$($_.Status)]" -ForegroundColor Green }

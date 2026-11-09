@@ -1,0 +1,90 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write  # 태그 빌드 시 릴리스 생성
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install numpy opencv-python-headless pytest
+      - run: pytest -q tests
+
+  build:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build credential provider DLL
+        run: |
+          cmake -S provider -B build -A x64
+          cmake --build build --config Release
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build verifier exe
+        run: |
+          pip install numpy opencv-python pyinstaller
+          pyinstaller --noconfirm --onedir --console --name faceunlock verifier/faceunlock.py
+
+      - name: Download face models
+        shell: pwsh
+        run: |
+          $m = "dist/faceunlock/models"
+          New-Item -ItemType Directory $m -Force | Out-Null
+          Invoke-WebRequest https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx -OutFile "$m/face_detection_yunet_2023mar.onnx"
+          Invoke-WebRequest https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx -OutFile "$m/face_recognition_sface_2021dec.onnx"
+
+      - name: Smoke test verifier (no camera -> must exit cleanly)
+        shell: pwsh
+        run: |
+          $env:FACEUNLOCK_DATA = "$env:RUNNER_TEMP\fu"
+          & dist/faceunlock/faceunlock.exe verify
+          if ($LASTEXITCODE -ne 2) { throw "expected exit 2 (not enrolled), got $LASTEXITCODE" }
+
+      - name: Check PowerShell syntax
+        shell: powershell
+        run: |
+          $bad = 0
+          Get-ChildItem installer, hello -Recurse -Include *.ps1, *.psm1 | ForEach-Object {
+            $errs = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errs) | Out-Null
+            if ($errs) { $bad++; $errs | ForEach-Object { Write-Host "$($_.Extent.File):$($_.Extent.StartLineNumber) $($_.Message)" } }
+          }
+          if ($bad) { throw "$bad file(s) with syntax errors" }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $out = "package/FaceUnlock"
+          New-Item -ItemType Directory "$out/verifier" -Force | Out-Null
+          Copy-Item build/Release/FaceUnlockProvider.dll $out
+          Copy-Item dist/faceunlock/* "$out/verifier" -Recurse
+          Copy-Item installer "$out/installer" -Recurse
+          Copy-Item README.md, LICENSE $out
+          Compress-Archive -Path $out -DestinationPath FaceUnlock.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FaceUnlock
+          path: package/FaceUnlock
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: FaceUnlock.zip

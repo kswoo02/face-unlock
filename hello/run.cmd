@@ -7,7 +7,7 @@ echo [1/2] Windows Hello face check (read-only)
 powershell -NoProfile -ExecutionPolicy Bypass -File "%HERE%scripts\Check-HelloFace.ps1"
 if %ERRORLEVEL% EQU 2 (
   echo.
-  echo Blocking issue found. See docs\HARDWARE.md
+  echo Blocking issue found. See HARDWARE.md
   pause
   exit /b 2
 )

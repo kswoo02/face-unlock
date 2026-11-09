@@ -55,6 +55,8 @@ jobs:
           $env:FACEUNLOCK_DATA = "$env:RUNNER_TEMP\fu"
           & dist/faceunlock/faceunlock.exe verify
           if ($LASTEXITCODE -ne 2) { throw "expected exit 2 (not enrolled), got $LASTEXITCODE" }
+          Write-Host "verifier smoke test ok (exit 2 = not enrolled)"
+          exit 0
 
       - name: Check PowerShell syntax
         shell: powershell

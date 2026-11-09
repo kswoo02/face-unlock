@@ -31,6 +31,18 @@ Win+L ─▶ 잠금 화면(LogonUI)
 
 ## 설치
 
+### 한 줄 설치 (권장)
+
+cmd 또는 PowerShell(관리자 아님)에 붙여 넣기:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/kswoo02/face-unlock/main/setup.ps1 | iex"
+```
+
+최신 릴리스를 `%USERPROFILE%\FaceUnlock` 에 받아 풀고, 관리자 권한으로 설치 화면을 엽니다. 이후 3번부터 진행하세요.
+
+### 수동 설치
+
 1. GitHub 저장소의 **Actions** 탭 → 최신 `build` 실행 → **FaceUnlock** 아티팩트를 내려받아 압축을 풉니다.
    (태그 `v*` 를 붙이면 Releases 에 `FaceUnlock.zip` 이 올라갑니다.)
 2. `installer\install.cmd` 를 더블클릭하고 관리자 권한 요청에 **예** 를 누릅니다.

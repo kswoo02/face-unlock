@@ -219,7 +219,7 @@ public:
         return S_OK;
     }
     IFACEMETHODIMP SetSelected(BOOL* pbAutoLogon) override;
-    IFACEMETHODIMP SetDeselected() override { return S_OK; }
+    IFACEMETHODIMP SetDeselected() override;
     IFACEMETHODIMP GetFieldState(DWORD id, CREDENTIAL_PROVIDER_FIELD_STATE* pcpfs,
                                  CREDENTIAL_PROVIDER_FIELD_INTERACTIVE_STATE* pcpfis) override {
         if (id >= FI_NUM_FIELDS || !pcpfs || !pcpfis) return E_INVALIDARG;
@@ -395,6 +395,19 @@ public:
         if (m_cancel) SetEvent(m_cancel);
     }
 
+    // 타일을 고를 때 자동 재시도: 선택 한 번에 최대 한 번만 (다시 고르면 재무장).
+    // 실패 -> CredentialsChanged -> 재선택이 반복돼 카메라가 끝없이 도는 것을 막는다.
+    // 로그인 실패 뒤에는 막아서 틀린 비밀번호로 계정 잠금까지 가는 루프를 피한다.
+    // 모두 LogonUI UI 스레드(SetSelected/SetDeselected/ReportResult)에서만 불린다.
+    bool TryAutoStart() {
+        if (!m_autoArmed || m_autoBlocked || IsMatched() || InterlockedCompareExchange(&m_running, 0, 0)) return false;
+        m_autoArmed = false;
+        StartRecognition();
+        return true;
+    }
+    void ArmAutoStart() { m_autoArmed = true; }
+    void BlockAutoStart() { m_autoBlocked = true; }
+
 private:
     ~FaceUnlockProvider() {
         if (m_credential) {
@@ -476,6 +489,8 @@ private:
     LONG m_running = 0;
     LONG m_matched = 0;
     bool m_attempted = false;
+    bool m_autoArmed = true;
+    bool m_autoBlocked = false;
     std::wstring m_status;
 };
 
@@ -483,6 +498,13 @@ private:
 IFACEMETHODIMP FaceUnlockCredential::SetSelected(BOOL* pbAutoLogon) {
     if (!pbAutoLogon) return E_INVALIDARG;
     *pbAutoLogon = (m_provider && m_provider->IsMatched()) ? TRUE : FALSE;
+    if (!*pbAutoLogon && m_provider && m_provider->TryAutoStart())
+        UpdateStatusField(L"얼굴 인식 중... 카메라를 바라보세요");
+    return S_OK;
+}
+
+IFACEMETHODIMP FaceUnlockCredential::SetDeselected() {
+    if (m_provider) m_provider->ArmAutoStart();
     return S_OK;
 }
 
@@ -558,7 +580,10 @@ IFACEMETHODIMP FaceUnlockCredential::ReportResult(NTSTATUS ntsStatus, NTSTATUS, 
     if (pcpsiOptionalStatusIcon) *pcpsiOptionalStatusIcon = CPSI_NONE;
     if (ntsStatus != STATUS_SUCCESS) {
         const wchar_t* msg = L"로그인 실패: 저장된 비밀번호가 바뀌었을 수 있습니다 (Set-Credential.ps1)";
-        if (m_provider) m_provider->SetStatus(msg);
+        if (m_provider) {
+            m_provider->SetStatus(msg);
+            m_provider->BlockAutoStart();
+        }
         UpdateStatusField(msg);
         if (ppszOptionalStatusText) SHStrDupW(msg, ppszOptionalStatusText);
         if (pcpsiOptionalStatusIcon) *pcpsiOptionalStatusIcon = CPSI_ERROR;

@@ -13,6 +13,7 @@
 
 명령
     enroll   얼굴 등록 (관리자 권한 필요: 템플릿이 관리자 전용 폴더에 저장됨)
+             --append 로 기존 등록에 다른 각도/조명/안경 샘플을 추가
     verify   얼굴 확인 (잠금 화면에서 사용)
     test     점수를 계속 출력하며 임계값 조정용으로 확인
 """
@@ -93,6 +94,21 @@ def normalize(v: np.ndarray) -> np.ndarray:
     return v / n if n > 0 else v
 
 
+def drop_outliers(feats: np.ndarray, threshold: float) -> np.ndarray:
+    """다른 샘플들과의 평균 유사도가 기준 미만인 샘플(흐림, 고개 많이 돌림 등)을 뺀다."""
+    if len(feats) < 3:
+        return feats
+    sims = feats @ feats.T
+    mean_other = (sims.sum(axis=1) - np.diag(sims)) / (len(feats) - 1)
+    return feats[mean_other >= threshold]
+
+
+def failure_reason(counts: dict) -> str:
+    """verify 실패 시 가장 많았던 원인: no_face(얼굴 없음) / small(얼굴 작음) / low(점수 부족)."""
+    fails = {k: counts.get(k, 0) for k in ("no_face", "small", "low")}
+    return max(fails, key=fails.get) if any(fails.values()) else "no_frames"
+
+
 def best_score(feature: np.ndarray, templates: np.ndarray) -> float:
     """등록된 템플릿들과의 코사인 유사도 최댓값."""
     f = normalize(feature)
@@ -129,6 +145,11 @@ def select_largest(faces, min_px: int):
 # ---------------------------------------------------------------------------
 # 카메라 / 모델
 # ---------------------------------------------------------------------------
+# 평균 밝기(0~255)가 이보다 낮은 프레임만 CLAHE 로 보정한다.
+# LFW 실험: 아주 어두운 동일인 쌍 통과 73/400 -> 181/400, 타인 점수는 오르지 않음.
+DARK_LEVEL = 50
+
+
 class Engine:
     def __init__(self):
         import cv2
@@ -141,16 +162,29 @@ class Engine:
         self.cv2 = cv2
         self.detector = cv2.FaceDetectorYN.create(str(det), "", (320, 320), 0.9, 0.3, 5000)
         self.recognizer = cv2.FaceRecognizerSF.create(str(rec), "")
+        self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+
+    def enhance(self, frame):
+        """밝기 채널만 국소 대비 보정."""
+        cv2 = self.cv2
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        lab[..., 0] = self.clahe.apply(lab[..., 0])
+        return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
 
     def feature(self, frame, min_px: int):
+        """(특징 벡터 | None, 상태) 상태: ok / no_face / small"""
+        if float(frame.mean()) < DARK_LEVEL:
+            frame = self.enhance(frame)
         h, w = frame.shape[:2]
         self.detector.setInputSize((w, h))
         _, faces = self.detector.detect(frame)
+        if faces is None or len(faces) == 0:
+            return None, "no_face"
         face = select_largest(faces, min_px)
         if face is None:
-            return None
+            return None, "small"
         aligned = self.recognizer.alignCrop(frame, face)
-        return normalize(self.recognizer.feature(aligned))
+        return normalize(self.recognizer.feature(aligned)), "ok"
 
 
 def open_camera(index: int):
@@ -173,7 +207,11 @@ def open_camera(index: int):
 # ---------------------------------------------------------------------------
 # 명령
 # ---------------------------------------------------------------------------
-def cmd_enroll(cfg: Config, preview: bool) -> int:
+def cmd_enroll(cfg: Config, preview: bool, append: bool = False) -> int:
+    existing = load_templates() if append else None
+    if append and existing is None:
+        print("추가할 기존 등록이 없습니다. --append 없이 먼저 등록하세요.")
+        return EXIT_NOT_ENROLLED
     engine = Engine()
     cap = open_camera(cfg.camera_index)
     if cap is None:
@@ -195,7 +233,7 @@ def cmd_enroll(cfg: Config, preview: bool) -> int:
                     return EXIT_ERROR
             if time.time() - last < 0.4:  # 비슷한 프레임만 쌓이지 않도록 간격을 둔다
                 continue
-            f = engine.feature(frame, cfg.min_face_px)
+            f, _ = engine.feature(frame, cfg.min_face_px)
             if f is None:
                 continue
             feats.append(f)
@@ -210,7 +248,12 @@ def cmd_enroll(cfg: Config, preview: bool) -> int:
         print("얼굴을 충분히 찍지 못했습니다. 밝은 곳에서 다시 시도하세요.")
         return EXIT_NO_MATCH
 
-    arr = np.stack(feats)
+    arr = drop_outliers(np.stack(feats), cfg.threshold)
+    if len(arr) < len(feats):
+        print(f"품질이 낮은 샘플 {len(feats) - len(arr)}개를 뺐습니다.")
+    if len(arr) < 3:
+        print("쓸 만한 샘플이 부족합니다. 혼자 카메라 앞에서 다시 시도하세요.")
+        return EXIT_NO_MATCH
     # 등록 샘플끼리 서로 비슷한지(다른 사람이 섞이지 않았는지) 확인
     sims = arr @ arr.T
     mean_sim = float((sims.sum() - len(arr)) / (len(arr) * (len(arr) - 1)))
@@ -218,12 +261,20 @@ def cmd_enroll(cfg: Config, preview: bool) -> int:
         print(f"등록 샘플 일관성이 낮습니다 ({mean_sim:.2f}). 혼자 카메라 앞에서 다시 시도하세요.")
         return EXIT_NO_MATCH
 
+    if existing is not None:
+        # 새 묶음이 기존 등록과 같은 사람인지: 최소 한 장은 기존 얼굴과 기준 이상으로 맞아야 한다.
+        link = max(best_score(f, existing) for f in arr)
+        if link < cfg.threshold:
+            print(f"기존 등록 얼굴과 다른 사람으로 보입니다 (최고 {link:.2f}). 추가하지 않습니다.")
+            return EXIT_NO_MATCH
+        arr = np.concatenate([existing, arr])
+
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     np.savez(TEMPLATE_FILE, features=arr)
     if not CONFIG_FILE.exists():
         CONFIG_FILE.write_text(json.dumps(asdict(cfg), indent=2), encoding="utf-8")
     print(f"등록 완료: {len(arr)}개 샘플, 평균 유사도 {mean_sim:.2f} -> {TEMPLATE_FILE}")
-    log(f"enroll ok samples={len(arr)} mean={mean_sim:.3f}")
+    log(f"enroll{' append' if append else ''} ok samples={len(arr)} mean={mean_sim:.3f}")
     return EXIT_MATCH
 
 
@@ -247,27 +298,41 @@ def cmd_verify(cfg: Config, verbose: bool, forever: bool = False) -> int:
         return EXIT_CAMERA
 
     decider = Decider(cfg.threshold, cfg.consecutive)
-    deadline = time.time() + cfg.timeout_sec
+    start = time.time()
+    deadline = start + cfg.timeout_sec
     best = -1.0
+    counts = {"frames": 0, "no_face": 0, "small": 0, "low": 0}
+    bright = 0.0
+    labels = {"no_face": "얼굴 없음", "small": "얼굴이 너무 작음 (가까이)"}
+
+    def stats() -> str:
+        return (f"best={best:.3f} t={time.time() - start:.1f}s frames={counts['frames']} no_face={counts['no_face']} "
+                f"small={counts['small']} low={counts['low']} bright={bright / max(1, counts['frames']):.0f}")
+
     try:
         while forever or time.time() < deadline:
             ok, frame = cap.read()
             if not ok:
                 continue
-            f = engine.feature(frame, cfg.min_face_px)
+            counts["frames"] += 1
+            bright += float(frame.mean())
+            f, status = engine.feature(frame, cfg.min_face_px)
             score = None if f is None else best_score(f, templates)
-            if score is not None:
+            if score is None:
+                counts[status] += 1
+            else:
                 best = max(best, score)
+                counts["low"] += score < cfg.threshold
             if verbose:
-                print("얼굴 없음" if score is None else f"점수 {score:.3f} (기준 {cfg.threshold})", flush=True)
+                print(labels.get(status) or f"점수 {score:.3f} (기준 {cfg.threshold})", flush=True)
             if decider.feed(score) and not forever:
-                log(f"verify: match best={best:.3f}")
+                log(f"verify: match {stats()}")
                 return EXIT_MATCH
     except KeyboardInterrupt:
         pass
     finally:
         cap.release()
-    log(f"verify: no match best={best:.3f}")
+    log(f"verify: no match reason={failure_reason(counts)} {stats()}")
     return EXIT_NO_MATCH
 
 
@@ -276,6 +341,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     e = sub.add_parser("enroll", help="얼굴 등록")
     e.add_argument("--preview", action="store_true", help="카메라 화면 표시")
+    e.add_argument("--append", action="store_true", help="기존 등록을 지우지 않고 샘플 추가")
     v = sub.add_parser("verify", help="얼굴 확인 (종료 코드로 결과)")
     v.add_argument("--verbose", action="store_true")
     sub.add_parser("test", help="점수를 계속 출력 (Ctrl+C 종료)")
@@ -284,7 +350,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = Config.load()
     try:
         if args.cmd == "enroll":
-            return cmd_enroll(cfg, args.preview)
+            return cmd_enroll(cfg, args.preview, args.append)
         if args.cmd == "verify":
             return cmd_verify(cfg, args.verbose)
         return cmd_verify(cfg, verbose=True, forever=True)

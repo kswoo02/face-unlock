@@ -17,7 +17,7 @@ IR 카메라가 없어 Windows Hello 얼굴 인식을 쓸 수 없는 노트북(�
 Win+L ─▶ 잠금 화면(LogonUI)
            │  FaceUnlockProvider.dll (Credential Provider)
            │     └─ 백그라운드에서 실행 ─▶ verifier\faceunlock.exe verify
-           │                                 ├ 웹캠 프레임 읽기 (OpenCV)
+           │                                 ├ 웹캠 프레임 읽기 (OpenCV), 어두우면 CLAHE 밝기 보정
            │                                 ├ 얼굴 검출: YuNet
            │                                 ├ 얼굴 특징: SFace → 등록된 얼굴과 코사인 유사도
            │                                 └ 연속 3프레임 기준 통과 → 종료 코드 0
@@ -60,6 +60,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 | --- | --- |
 | Windows 비밀번호를 바꿨을 때 | `.\Set-Credential.ps1` |
 | 얼굴 다시 등록 (안경, 머리 스타일 변경 등) | `.\Enroll.ps1` |
+| 기존 등록에 샘플 추가 (어두운 방, 안경 착용, 다른 각도) | `.\Enroll.ps1 -Append` |
 | 인식 점수 확인 | `.\Enroll.ps1 -Test` |
 | 완전 제거 | `.\Uninstall.ps1` (바꾼 정책도 되돌림) |
 
@@ -81,10 +82,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 | --- | --- |
 | 잠금 화면에 "얼굴 인식" 타일이 없음 | 로그인 옵션 아이콘 중 얼굴 모양 선택. 그래도 없으면 `Install.ps1 -SkipEnroll` 재실행 |
 | "카메라를 열 수 없습니다" | 다른 앱이 카메라 사용 중인지 확인. 설정 > 개인 정보 > 카메라 > "데스크톱 앱이 카메라에 액세스하도록 허용" 켜기 |
-| "얼굴을 인식하지 못했습니다" | 조명 확인 → '다시 시도'. 반복되면 `Enroll.ps1` 로 재등록 |
+| "얼굴을 인식하지 못했습니다" | 조명 확인 → '다시 시도' (타일을 다시 고르면 한 번 자동 재시도). 반복되면 그 조건에서 `Enroll.ps1 -Append` |
 | "로그인 실패: 저장된 비밀번호…" | `Set-Credential.ps1` |
 | Microsoft 계정에서 로그인 실패 | 설정 > 계정 > 로그인 옵션 > "보안 강화를 위해 Microsoft 계정에 Windows Hello 로그인만 허용" **끄기** |
-| 자세한 원인 | `C:\ProgramData\FaceUnlock\verify.log` |
+| 자세한 원인 | `C:\ProgramData\FaceUnlock\verify.log` — `reason=no_face`(얼굴 못 찾음: 조명·각도) / `small`(너무 멂) / `low`(점수 부족) |
 
 ### 비상 복구 (로그인 화면이 이상할 때)
 

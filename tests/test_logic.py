@@ -41,6 +41,21 @@ def test_select_largest_and_min_size():
     assert fu.select_largest(None, 80) is None
 
 
+def test_drop_outliers_removes_odd_sample():
+    good = np.array([[1, 0.1, 0], [1, 0, 0.1], [1, 0.05, 0.05]], dtype=np.float32)
+    odd = np.array([[0, 0, 1]], dtype=np.float32)
+    feats = np.stack([fu.normalize(v) for v in np.vstack([good, odd])])
+    kept = fu.drop_outliers(feats, 0.45)
+    assert len(kept) == 3 and not (kept @ fu.normalize(odd[0]) > 0.9).any()
+    assert len(fu.drop_outliers(feats[:2], 0.45)) == 2  # 샘플이 너무 적으면 그대로
+
+
+def test_failure_reason_picks_most_common():
+    assert fu.failure_reason({"frames": 10, "no_face": 7, "small": 1, "low": 2}) == "no_face"
+    assert fu.failure_reason({"frames": 10, "no_face": 0, "small": 0, "low": 10}) == "low"
+    assert fu.failure_reason({"frames": 0}) == "no_frames"
+
+
 def test_config_load_overrides_and_bad_file():
     fu.DATA_DIR.mkdir(parents=True, exist_ok=True)
     fu.CONFIG_FILE.write_text(json.dumps({"threshold": 0.6, "unknown": 1}), encoding="utf-8")

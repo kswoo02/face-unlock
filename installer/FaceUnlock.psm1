@@ -7,9 +7,10 @@ $script:ConfigKey = 'HKLM:\SOFTWARE\FaceUnlock'
 $script:SecretName = 'L$FaceUnlock'
 $script:CpKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\Credential Providers\$script:Clsid"
 $script:ClsidKey = "HKLM:\SOFTWARE\Classes\CLSID\$script:Clsid"
+# 모델은 바뀔 수 있는 main 브랜치에서 받으므로 SHA256 으로 고정한다. 바뀐 모델은 "아무 얼굴이나 통과" 가 될 수 있다.
 $script:Models = @{
-    'face_detection_yunet_2023mar.onnx'   = 'https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx'
-    'face_recognition_sface_2021dec.onnx' = 'https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx'
+    'face_detection_yunet_2023mar.onnx'   = @{ Url = 'https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx'; Sha256 = '8F2383E4DD3CFBB4553EA8718107FC0423210DC964F9F4280604804ED2552FA4' }
+    'face_recognition_sface_2021dec.onnx' = @{ Url = 'https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx'; Sha256 = '0BA9FBFA01B5270C96627C4EF784DA859931E02F04419C829E83484087C34E79' }
 }
 
 function Get-FaceUnlockPaths {
@@ -167,18 +168,26 @@ function Set-FaceUnlockCredential {
 function Initialize-DataDir {
     <# 얼굴 템플릿 폴더: SYSTEM + Administrators 만 접근. 일반 사용자가 남의 얼굴로 바꿔치기 못하게. #>
     New-Item -ItemType Directory -Path $script:DataDir -Force | Out-Null
-    & icacls.exe $script:DataDir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+    # ProgramData 는 일반 사용자도 폴더를 만들 수 있다. 미리 만든 사람이 소유자로 남으면 권한을 되돌릴 수 있으므로 소유자부터 바꾼다.
+    & icacls.exe $script:DataDir /setowner '*S-1-5-32-544' /T /C | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "폴더 소유자 설정 실패: $script:DataDir" }
+    & icacls.exe $script:DataDir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /T /C | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "폴더 권한 설정 실패: $script:DataDir" }
 }
 
 function Install-Models([string]$ModelDir) {
     New-Item -ItemType Directory -Path $ModelDir -Force | Out-Null
     foreach ($name in $script:Models.Keys) {
+        $m = $script:Models[$name]
         $dst = Join-Path $ModelDir $name
-        if (Test-Path $dst) { continue }
+        if ((Test-Path $dst) -and (Get-FileHash $dst -Algorithm SHA256).Hash -eq $m.Sha256) { continue }
         Write-Host "모델 다운로드: $name"
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $script:Models[$name] -OutFile $dst -UseBasicParsing
+        Invoke-WebRequest -Uri $m.Url -OutFile $dst -UseBasicParsing
+        if ((Get-FileHash $dst -Algorithm SHA256).Hash -ne $m.Sha256) {
+            Remove-Item $dst -Force
+            throw "모델 해시 불일치: $name (변조되었거나 원본이 바뀌었습니다)"
+        }
     }
 }
 

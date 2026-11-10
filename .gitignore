@@ -7,3 +7,6 @@ package/
 *.spec
 *.onnx
 *.npz
+
+# 로컬 전용 (보안 규칙, 개인 설정) - 올리지 않음
+.claude/*.local.*

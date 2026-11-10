@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # 태그 빌드 시 릴리스 생성
+  contents: read
 
 jobs:
   test:
@@ -24,6 +24,8 @@ jobs:
   build:
     needs: test
     runs-on: windows-latest
+    permissions:
+      contents: write  # 릴리스 생성
     steps:
       - uses: actions/checkout@v4
 
@@ -48,6 +50,15 @@ jobs:
           New-Item -ItemType Directory $m -Force | Out-Null
           Invoke-WebRequest https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx -OutFile "$m/face_detection_yunet_2023mar.onnx"
           Invoke-WebRequest https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx -OutFile "$m/face_recognition_sface_2021dec.onnx"
+          # installer/FaceUnlock.psm1 의 $script:Models 해시와 같아야 한다
+          $want = @{
+            'face_detection_yunet_2023mar.onnx'   = '8F2383E4DD3CFBB4553EA8718107FC0423210DC964F9F4280604804ED2552FA4'
+            'face_recognition_sface_2021dec.onnx' = '0BA9FBFA01B5270C96627C4EF784DA859931E02F04419C829E83484087C34E79'
+          }
+          foreach ($k in $want.Keys) {
+            $h = (Get-FileHash "$m/$k" -Algorithm SHA256).Hash
+            if ($h -ne $want[$k]) { throw "model hash mismatch: $k ($h)" }
+          }
 
       - name: Smoke test verifier (no camera -> must exit cleanly)
         shell: pwsh

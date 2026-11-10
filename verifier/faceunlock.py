@@ -71,6 +71,13 @@ class Config:
             pass
         except Exception as e:  # 설정이 깨져도 기본값으로 동작
             log(f"config error: {e}")
+        # 기준을 낮춰 아무 얼굴이나 통과하게 만드는 설정은 받지 않는다 (다른 사람 점수는 보통 0.3 이하)
+        if not 0.3 <= cfg.threshold <= 1.0:
+            log(f"config error: threshold {cfg.threshold} out of range, using default")
+            cfg.threshold = cls.threshold
+        if cfg.consecutive < 1:
+            log(f"config error: consecutive {cfg.consecutive} < 1, using default")
+            cfg.consecutive = cls.consecutive
         return cfg
 
 

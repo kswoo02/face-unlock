@@ -62,6 +62,9 @@ def test_config_load_overrides_and_bad_file():
     assert fu.Config.load().threshold == 0.6
     fu.CONFIG_FILE.write_text("{broken", encoding="utf-8")
     assert fu.Config.load().threshold == fu.Config().threshold
+    fu.CONFIG_FILE.write_text(json.dumps({"threshold": 0.0, "consecutive": 0}), encoding="utf-8")
+    cfg = fu.Config.load()
+    assert cfg.threshold == fu.Config().threshold and cfg.consecutive == fu.Config().consecutive
 
 
 def test_verify_without_enrollment_returns_2():

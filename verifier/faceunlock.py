@@ -23,6 +23,7 @@ import argparse
 import json
 import os
 import sys
+import threading
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -194,7 +195,7 @@ class Engine:
         return normalize(self.recognizer.feature(aligned)), "ok"
 
 
-def open_camera(index: int):
+def open_camera(index: int, warmup: int = 5):
     import cv2
 
     backends = [cv2.CAP_MSMF, cv2.CAP_DSHOW, cv2.CAP_ANY] if os.name == "nt" else [cv2.CAP_ANY]
@@ -204,7 +205,7 @@ def open_camera(index: int):
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
             # 자동 노출이 잡히도록 몇 프레임 버린다
-            for _ in range(5):
+            for _ in range(warmup):
                 cap.read()
             return cap
         cap.release()
@@ -298,8 +299,16 @@ def cmd_verify(cfg: Config, verbose: bool, forever: bool = False) -> int:
     if templates is None:
         log("verify: not enrolled")
         return EXIT_NOT_ENROLLED
-    engine = Engine()
-    cap = open_camera(cfg.camera_index)
+    # 카메라 켜기(~1.5초)가 가장 느리므로 모델 로딩과 동시에 한다.
+    # 버리는 프레임도 없앤다: 노출이 덜 잡힌 프레임은 그냥 판정에 실패하고 다음 프레임으로 넘어간다.
+    box = {}
+    cam = threading.Thread(target=lambda: box.update(cap=open_camera(cfg.camera_index, warmup=0)))
+    cam.start()
+    try:
+        engine = Engine()
+    finally:
+        cam.join()
+    cap = box.get("cap")
     if cap is None:
         log("verify: camera open failed")
         return EXIT_CAMERA
